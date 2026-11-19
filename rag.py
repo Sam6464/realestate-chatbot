@@ -1,3 +1,4 @@
+import time
 import json, os, re
 import numpy as np
 from dotenv import load_dotenv
@@ -27,7 +28,7 @@ vectors = np.load(os.path.join(BASE, "index", "vectors.npy"))
 norms = np.linalg.norm(vectors, axis=1)
 embedder = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
 
-llm = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY"))
+llm = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.getenv("OPENROUTER_API_KEY"), max_retries=0)
 
 
 def retrieve(query, k=6):
@@ -38,19 +39,23 @@ def retrieve(query, k=6):
 
 
 def call_llm(messages):
+    deadline = time.time() + 90          # never wait more than ~90s in total
     last_error = None
     for model in MODELS:
-        for _ in range(2):  # one retry per model
-            try:
-                resp = llm.chat.completions.create(
-                    model=model, messages=messages, temperature=0.2,
-                    max_tokens=700, timeout=60,
-                )
-                text = (resp.choices[0].message.content or "").strip()
-                if text:
-                    return text, model
-            except Exception as e:
-                last_error = e
+        remaining = deadline - time.time()
+        if remaining < 8:
+            break
+        try:
+            resp = llm.chat.completions.create(
+                model=model, messages=messages, temperature=0.2,
+                max_tokens=600, timeout=min(40, remaining),
+            )
+            text = (resp.choices[0].message.content or "").strip()
+            if text:
+                return text, model
+        except Exception as e:
+            last_error = e
+            print(f"MODEL FAILED: {model} -> {type(e).__name__}: {str(e)[:300]}", flush=True)
     raise RuntimeError(f"All models failed: {last_error}")
 
 
