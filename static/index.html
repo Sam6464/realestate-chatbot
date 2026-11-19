@@ -106,7 +106,10 @@ footer { text-align: center; font-size: 11.5px; color: var(--muted); padding: 2p
   header { padding: 12px 14px; } .titles h1 { font-size: 18px; } .titles p { display: none; }
   .bubble { font-size: 15px; } #send { padding: 0 16px; }
 }
-@media (prefers-reduced-motion: reduce) { .typing i { animation: none; opacity: .8; } }
+@keyframes pulse { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .typing i { animation: pulse 1.4s infinite ease-in-out; } }
+.typing .t { margin-left: 8px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.timer { font-size: 12.5px; color: var(--muted); padding: 0 4px; font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -176,7 +179,7 @@ function addUser(q) {
 }
 function addTyping() {
   const m = document.createElement("div"); m.className = "msg bot";
-  m.innerHTML = '<div class="bubble"><div class="typing" aria-label="Assistant is typing"><i></i><i></i><i></i></div></div>';
+  m.innerHTML = '<div class="bubble"><div class="typing" aria-label="Assistant is typing"><i></i><i></i><i></i><span class="t">Thinking 0s</span></div></div>';
   col.appendChild(m); scroll(); return m;
 }
 function chipLabel(s) {
@@ -184,10 +187,10 @@ function chipLabel(s) {
   if (!t) t = s.url.replace(/^https?:\/\/(www\.)?/, "");
   return t.length > 36 ? t.slice(0, 35) + "\u2026" : t;
 }
-function addBot(answer, sources, failedQ) {
+function addBot(answer, sources, failedQ, secs) {
   const m = document.createElement("div"); m.className = "msg bot";
   const b = document.createElement("div"); b.className = "bubble";
-  b.innerHTML = md(answer); m.appendChild(b);
+  m.appendChild(b);
   const tools = document.createElement("div"); tools.className = "tools";
   if (failedQ) {
     const r = document.createElement("button"); r.className = "act"; r.textContent = "Retry";
@@ -207,7 +210,24 @@ function addBot(answer, sources, failedQ) {
     });
     tools.appendChild(c);
   }
-  m.appendChild(tools); col.appendChild(m); scroll();
+  if (secs != null) {
+    const t = document.createElement("span"); t.className = "timer";
+    t.textContent = "Answered in " + secs + "s"; tools.appendChild(t);
+  }
+  col.appendChild(m);
+  if (secs == null) { b.innerHTML = md(answer); m.appendChild(tools); scroll(); return Promise.resolve(); }
+  return new Promise(done => {
+    const parts = answer.split(/(\s+)/); let n = 0;
+    const step = () => {
+      n = Math.min(parts.length, n + 6);
+      let p = parts.slice(0, n).join("");
+      if ((p.match(/\*\*/g) || []).length % 2) p += "**";
+      b.innerHTML = md(p); scroll();
+      if (n < parts.length) setTimeout(step, 30);
+      else { m.appendChild(tools); scroll(); done(); }
+    };
+    step();
+  });
 }
 
 async function ask(q, isRetry) {
@@ -216,6 +236,11 @@ async function ask(q, isRetry) {
   document.getElementById("welcome")?.remove();
   if (!isRetry) addUser(q);
   const typing = addTyping();
+  const t0 = Date.now();
+  const tick = setInterval(() => {
+    const s = typing.querySelector(".t");
+    if (s) s.textContent = "Thinking " + Math.floor((Date.now() - t0) / 1000) + "s";
+  }, 1000);
   const wake = setTimeout(() => {
     const p = document.createElement("div"); p.className = "wake";
     p.textContent = "Still working. The server may be waking up, so the first answer can take up to a minute.";
@@ -228,15 +253,18 @@ async function ask(q, isRetry) {
       body: JSON.stringify({ question: q, history }), signal: ctrl.signal
     });
     const data = await r.json();
+    const secs = Math.round((Date.now() - t0) / 1000);
+    clearInterval(tick); clearTimeout(wake);
     typing.remove();
     if (/models are busy/i.test(data.answer || "")) {
       addBot("The AI models are busy right now. Try again in a moment.", [], q);
     } else {
-      addBot(data.answer, data.sources);
+      await addBot(data.answer, data.sources, null, secs);
       history.push({ role: "user", content: q }, { role: "assistant", content: data.answer });
       history = history.slice(-8);
     }
   } catch (e) {
+    clearInterval(tick);
     typing.remove();
     addBot("The connection failed or timed out. Check your internet and try again.", [], q);
   }
