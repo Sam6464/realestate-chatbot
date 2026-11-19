@@ -1,6 +1,6 @@
 # Real Estate Chatbot: Dar Global & Wasalt
 
-Live demo: (URL goes here after deployment)
+ Live demo: https://realestate-chatbot-rhu7.onrender.com/
 
 A RAG (retrieval-augmented generation) chatbot that answers questions about Dar Global projects and Wasalt property listings.
 
